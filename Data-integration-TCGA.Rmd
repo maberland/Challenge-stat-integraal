@@ -3,17 +3,141 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+## Chargement des packages
 
 ```{r}
-plot(cars)
+library(caret)
+library(tidyverse)
+library("randomForest")
+library("FactoMineR")
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+## Chargement des données
+```{r}
+load("Data/tcga_calibvf.RDa")
+load("Data/tcga_testvf.RDa")
+```
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+# Random forest sur les donnes de RNASeq -- Sandrine
+```{r}
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+xF = rnaseq_cal
+yF = factor(vital_cal$vitalstatus)
+ntreeF = 5000
+mtryF = sqrt(ncol(rnaseq_cal))
+nbre_repetF = 10 #1000
+seedInitF = 20180827
+nbreVIVF = c(100, 200, 300)
+nbVarSeqF = floor(seq(1, ncol(xF), ncol(xF)/20))
+
+robustSeed <- function(xF, # Dataframe avec les variables explicatives en colonne et les individus en ligne, l identification des individus se fait par le rownames
+                       yF, # Variable a expliquer
+                       ntreeF, 
+                       mtryF = sqrt(ncol(xF)), 
+                       nbre_repetF, 
+                       seedInitF, 
+                       nbreVIVF = c(100, 200, 300), 
+                       nbVarSeqF = floor(seq(1, ncol(xF), ncol(xF)/20))  ) 
+  {
+  # data est une matrice avec seulement les variables resultats
+  # L identification des individus se fait par le rownames
+  
+  ErreurOOB_v = rep(NA,nbre_repetF)
+  Predicted_m = matrix(NA, nrow = nrow(xF), ncol = nbre_repetF)
+  ImportanceRank_m = matrix(NA, nrow = ncol(xF), ncol = nbre_repetF)
+  ImportanceVal_m = matrix(NA, nrow = ncol(xF), ncol = nbre_repetF)
+  
+  nbreVar = length(colnames(xF))
+  
+  rownames(Predicted_m) = rownames(xF)
+  rownames(ImportanceRank_m) = colnames(xF)
+  rownames(ImportanceVal_m ) = colnames(xF)
+  
+  for (i in 1:nbre_repetF) {
+    set.seed(seedInitF+i*1000) 
+    
+    rfc1 <- randomForest(x=xF,
+                         y=yF,
+                         ntree=ntreeF,
+                         mtry = mtryF,
+                         importance=T,
+                         proximity=T,
+                         keep.forest=F)
+    ErreurOOB_v[i] = rfc1$err.rate[nrow(rfc1$err.rate),1] # = sum(rfc1$predicted!=souche)/length(souche) 
+    Predicted_m[,i] = rfc1$predicted
+    # Les importances les plus elevees donnent les variables les plus importantes
+    # donc les rangs les plus eleves donnent les variables les plus importantes
+    # Pour rendre le rang plus intuitif on trie sur l inverse du rang
+    # Les variables restent dans l ordre initial
+    ImportanceRank_m[,i] = rank(-rfc1$importance[, "MeanDecreaseAccuracy"])
+    ImportanceVal_m[,i] = rfc1$importance[, "MeanDecreaseAccuracy"]
+    
+  } 
+  
+  
+  selVarFreq = matrix(NA, nrow = nrow(ImportanceRank_m), ncol = length(nbVarSeqF))
+  rownames(selVarFreq) = rownames(ImportanceRank_m)
+  colnames(selVarFreq) = nbVarSeqF
+  for (i in 1:length(nbVarSeqF)) {
+    varPres = ImportanceRank_m[, ] < nbVarSeqF[i]
+    selVarFreq[, i] = apply(varPres, 1, sum) / nbre_repetF
+  }
+  
+  # Graphique representant la frequence de selection de chaque variable en fonction du nombre de variables selectionnees
+  
+  tselVarFreq = t(selVarFreq)
+  col = rainbow(ncol(tselVarFreq))
+  matplot(tselVarFreq, type = 'l', axes = FALSE, xlab = 'Number of var. kept',
+          ylab = 'Frequency of selection', col = col, lwd = 2, lty = 1)
+  axis(1, c(1:nrow(tselVarFreq)), labels = nbVarSeqF)
+  axis(2)
+  title("Freq. of var. sel. / Nb of var. kept for each var.")  
+  
+  
+  # Description de l erreur OOB (on veut un boxplot le plus tasse possible et on regarde egalement le max)
+  boxplot(ErreurOOB_v)
+  title("OOB error - Summary across different seeds")
+  print(summary(ErreurOOB_v))
+  
+  # Pour les pr?dictions on veut que la classe la plus frequente (le mode) soit vraiment tres frequente
+  MODEFREQ=function(x){
+    #  names(sort(-table(x)))[1]  # Donne le mode
+    sort(table(x))[length(table(x))]  # Donne la frequence du mode
+  }
+  modeFreq = apply(Predicted_m, 1, MODEFREQ)/nbre_repetF*100
+  print("Reproducibility of classification")
+  print(table(modeFreq))
+  
+  print(Predicted_m[, 1:min(10, ncol(Predicted_m))]) 
+
+  selVar = list()
+  for (j in 1:length(nbreVIVF)) {
+
+    # Importance pour degager un set de communes sur l ensemble des simulations
+    ImportanceL_m = ImportanceRank_m <= nbreVIVF[j]
+    VIV = apply(ImportanceL_m, 1, sum)
+    print("Nombre de VIV considerees")
+    print(nbreVIVF[j])
+    print("Frequence de la presence des variables dans la liste des VIV")
+    print(table(VIV))
+    print("Variables presentes dans 70% des listes de VIV")
+    print(VIV[which(VIV >= 0.7*nbre_repetF)])
+    
+    subdata = subset(data, select=c(which(VIV >= 0.7*nbre_repetF)))
+    classifDeBase(subdata)
+    
+    selVar[[j]] = which(VIV >= 0.7*nbre_repetF)
+    
+  }
+  
+  return(list(rfc1, selVar,selVarFreq))
+  
+}
+
+
+  save(rfc1, file="./rfc1_RNASeq.Rdata")
+
+```
+
 
