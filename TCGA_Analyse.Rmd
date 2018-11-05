@@ -1,0 +1,176 @@
+---
+title: "TCGA_Analyse"
+author: "Sandrine"
+date: "11 juin 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+
+library("randomForest")
+library("FactoMineR")
+
+```
+
+
+```{r}
+
+load(file = "./tcga_calibvf.RDa")
+
+load(file = "./tcga_testvf.RDa")
+
+
+
+```
+
+
+
+
+# Fonctions Random forest
+
+```{r}
+
+
+# # Pour la mise au point
+xF = rnaseq_cal[, 1:500]
+yF = factor(vital_cal$vitalstatus)
+testingSetF = rnaseq_test[, 1:500]
+ntreeF = 800
+mtryF = sqrt(ncol(rnaseq_cal))
+nbre_repetF = 10 #1000
+seedInitF = 20180827
+
+RF_robust <- function(xF, # Dataframe avec les variables explicatives en colonne et les individus en ligne, l identification des individus se fait par le rownames
+                       yF, # Variable a expliquer
+                      testingSetF, # dataFrame de test
+                       ntreeF, # Nombre d arbre dans chaque foret
+                       mtryF = sqrt(ncol(xF)), # Nombre de variables retenues dans les etapes de RF
+                       nbre_repetF, # Nombre de RF qui seront faites pour analyser la robustesse des resultats
+                       seedInitF) # Graine
+  {
+
+  ErreurOOB = rep(NA,nbre_repetF)
+  Predicted_trainingSet = matrix(NA, nrow = nrow(xF), ncol = nbre_repetF)
+  Predicted_testingSet = matrix(NA, nrow = nrow(testingSetF), ncol = nbre_repetF)
+  ImportanceRank = matrix(NA, nrow = ncol(xF), ncol = nbre_repetF)
+  ImportanceVal = matrix(NA, nrow = ncol(xF), ncol = nbre_repetF)
+  
+  nbreVar = length(colnames(xF))
+  
+  rownames(Predicted_trainingSet) = rownames(xF)
+  rownames(Predicted_testingSet) = rownames(testingSetF)
+  rownames(ImportanceRank) = colnames(xF)
+  rownames(ImportanceVal ) = colnames(xF)
+  
+  for (i in 1:nbre_repetF) {
+    set.seed(seedInitF+i*1000) 
+    
+    rfc1 <- randomForest(x=xF,
+                         y=yF,
+                         ntree=ntreeF,
+                         mtry = mtryF,
+                         importance=T,
+                         proximity=T,
+                         keep.forest=TRUE)
+    
+    if (i==1) {
+      plot(rfc1)
+      rf = rfc1
+    }
+    
+    ErreurOOB[i] = rfc1$err.rate[nrow(rfc1$err.rate),1] # = sum(rfc1$predicted!=souche)/length(souche) 
+    Predicted_trainingSet[,i] = rfc1$predicted
+    Predicted_testingSet[,i] = predict(rfc1, testingSetF)    
+    # Les importances les plus elevees donnent les variables les plus importantes
+    # donc les rangs les plus eleves donnent les variables les plus importantes
+    # Pour rendre le rang plus intuitif on trie sur l inverse du rang
+    # Les variables restent dans l ordre initial
+    ImportanceRank[,i] = rank(-rfc1$importance[, "MeanDecreaseAccuracy"])
+    ImportanceVal[,i] = rfc1$importance[, "MeanDecreaseAccuracy"]
+  } # Boucle sur i nombre de fois que l on fait tourner random forest
+
+    
+  # On classe l ensemble des variables sur l ensemble des random forest pour obtenir leur rang global
+  ImportanceRankGolbal = apply(ImportanceRank, 1, sum)
+  ImportanceRankGolbal = ImportanceRankGolbal[ order(ImportanceRankGolbal)]
+
+  return(list(rf = rf, EOOB = ErreurOOB, Predicted_trainingSet = Predicted_trainingSet, Predicted_testingSet = Predicted_testingSet, 
+              ImportanceRank = ImportanceRank, ImportanceVal = ImportanceVal, ImportanceRankGolbal = ImportanceRankGolbal))
+} # Fin de RF_robust
+
+
+
+
+
+
+RF_robust_Descr = function(resF) {
+
+  # Description de l erreur OOB (on veut un boxplot le plus tasse possible et on regarde egalement le max)
+  ########################################################################################################○
+  boxplot(resF$EOOB)
+  title("OOB error - Summary across different seeds")
+  print(summary(resF$EOOB))
+  
+  # Une amelioration serait de faire varier le nombre d arbre et de fixer le nombre d arbre a retenir au moment de la stabilisation de l EOOB
+  
+  
+  # Description de la stabilite des classifications pour le set de training
+  #########################################################################
+ # Pour les pr?dictions on veut que la classe la plus frequente (le mode) soit vraiment tres frequente
+  MODEFREQ=function(x){
+    #  names(sort(-table(x)))[1]  # Donne le mode (classe la plus frequemment predite)
+    sort(table(x))[length(table(x))]  # Donne la frequence du mode (nombre de fois ou la classe la plus frequente a ete predite)
+  }
+  modeFreq = apply(resF$Predicted_trainingSet, 1, MODEFREQ)/ncol(resF$Predicted_trainingSet)*100
+  print("Reproducibility of classification on the training set")
+  print(table(modeFreq)) # La frequence 100% a ete observee 90 fois soit pour tous les individus
+  
+
+  # Description de la stabilite des classifications pour le set de testing
+  #########################################################################
+  modeFreq = apply(resF$Predicted_testingSet, 1, MODEFREQ)/ncol(resF$Predicted_testingSet)*100
+  print("Reproducibility of classification on the testing set")
+  print(table(modeFreq)) # La frequence 100% a ete observee 90 fois soit pour tous les individus
+  
+  
+   
+  # Description de la stabilite de la selection de variables
+  ##########################################################
+  # En utilisant ImportanceRankGolbal on peut sortir notre top 10 ...
+  
+    
+} # Fin de RF_robust_Descr
+  
+
+
+
+
+
+```
+
+
+## Lancement pour RNASeq
+
+```{r}
+
+
+res = RF_robust(xF = rnaseq_cal[, 1:500], 
+          yF = factor(vital_cal$vitalstatus), 
+          testingSetF = rnaseq_test[, 1:500],          
+          ntreeF = 800, 
+          mtryF = sqrt(ncol(rnaseq_cal)),
+          nbre_repetF = 10, #1000
+          seedInitF = 20180827          
+)  
+
+RF_robust_Descr(res)
+  
+table(res$Predicted_testingSet[, 1])
+
+```
+
