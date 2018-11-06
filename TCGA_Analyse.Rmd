@@ -18,32 +18,30 @@ library("FactoMineR")
 ```
 
 
-```{r}
+# Calcul des random forest
 
+```{r, eval=FALSE}
+# A lancer si on veut calculer les RF en partant des donnees brutes
 load(file = "./tcga_calibvf.RDa")
-
 load(file = "./tcga_testvf.RDa")
-
-
 
 ```
 
 
 
+## Definition fonctions
 
-# Fonctions Random forest
+```{r, eval=FALSE}
 
-```{r}
-
-
-# # Pour la mise au point
-xF = rnaseq_cal[, 1:500]
-yF = factor(vital_cal$vitalstatus)
-testingSetF = rnaseq_test[, 1:500]
-ntreeF = 800
-mtryF = sqrt(ncol(rnaseq_cal))
-nbre_repetF = 10 #1000
-seedInitF = 20180827
+# 
+# # # Pour la mise au point
+# xF = rnaseq_cal[, 1:500]
+# yF = factor(vital_cal$vitalstatus)
+# testingSetF = rnaseq_test[, 1:500]
+# ntreeF = 800
+# mtryF = sqrt(ncol(rnaseq_cal))
+# nbre_repetF = 10 #1000
+# seedInitF = 20180827
 
 RF_robust <- function(xF, # Dataframe avec les variables explicatives en colonne et les individus en ligne, l identification des individus se fait par le rownames
                        yF, # Variable a expliquer
@@ -103,10 +101,123 @@ RF_robust <- function(xF, # Dataframe avec les variables explicatives en colonne
               ImportanceRank = ImportanceRank, ImportanceVal = ImportanceVal, ImportanceRankGolbal = ImportanceRankGolbal))
 } # Fin de RF_robust
 
+```
+
+
+## Lancement pour RNASeq
+
+```{r, eval=FALSE}
+
+res_RNASeq = RF_robust(xF = rnaseq_cal, 
+                       yF = factor(vital_cal$vitalstatus), 
+                       testingSetF = rnaseq_test,          
+                       ntreeF = 800, 
+                       mtryF = sqrt(ncol(rnaseq_cal)),
+                       nbre_repetF = 10, #1000
+                       seedInitF = 20180827          
+)  
+
+```
 
 
 
 
+## Lancement pour cna
+
+```{r, eval=FALSE}
+
+res_CNA = RF_robust(xF = cna_cal, 
+                    yF = factor(vital_cal$vitalstatus), 
+                    testingSetF = cna_test,          
+                    ntreeF = 800, 
+                    mtryF = sqrt(ncol(cna_cal)),
+                    nbre_repetF = 10, #1000
+                    seedInitF = 20180827          
+)  
+
+```
+
+
+
+## Lancement pour methyl
+
+```{r, eval=FALSE}
+
+res_methyl = RF_robust(xF = methyl_cal, 
+                    yF = factor(vital_cal$vitalstatus), 
+                    testingSetF = methyl_test,          
+                    ntreeF = 800, 
+                    mtryF = sqrt(ncol(methyl_cal)),
+                    nbre_repetF = 10, #1000
+                    seedInitF = 20180827          
+)  
+
+```
+
+
+
+
+
+## Lancement pour mirna
+
+```{r, eval=FALSE}
+
+res_miRNA = RF_robust(xF = mirna_cal, 
+                    yF = factor(vital_cal$vitalstatus), 
+                    testingSetF = mirna_test,          
+                    ntreeF = 800, 
+                    mtryF = sqrt(ncol(mirna_cal)),
+                    nbre_repetF = 10, #1000
+                    seedInitF = 20180827          
+)  
+
+```
+
+
+
+
+## Lancement pour les 4 jeux de donnees regroupes
+
+```{r, eval=FALSE}
+
+dataCompl_cal = cbind(rnaseq_cal, cna_cal, methyl_cal, mirna_cal)
+dataCompl_test = cbind(rnaseq_test, cna_test, methyl_test, mirna_test)
+
+
+res_dataCompl = RF_robust(xF = dataCompl_cal, 
+                    yF = factor(vital_cal$vitalstatus), 
+                    testingSetF = dataCompl_test,          
+                    ntreeF = 800, 
+                    mtryF = sqrt(ncol(dataCompl_cal)),
+                    nbre_repetF = 10, #1000
+                    seedInitF = 20180827          
+)  
+
+
+
+```
+
+```{r, eval=FALSE}
+
+save(res_RNASeq, res_CNA, res_methyl, res_miRNA, res_dataCompl , file = "./rf1.Rdata")
+
+```
+
+
+# Description des resultats des random forest
+
+## Chargement donnees
+
+```{r, eval=TRUE}
+# A lancer si on veut decrire les RF en partant des resultats des RF
+load(file = "./rf1.Rdata")
+
+```
+
+
+## Definition fonctions
+
+```{r, eval=TRUE}
 
 RF_robust_Descr = function(resF) {
 
@@ -145,32 +256,59 @@ RF_robust_Descr = function(resF) {
   
     
 } # Fin de RF_robust_Descr
-  
-
-
-
-
 
 ```
 
 
-## Lancement pour RNASeq
+## Description RNASeq
 
-```{r}
+```{r, eval=TRUE}
 
-
-res = RF_robust(xF = rnaseq_cal[, 1:500], 
-          yF = factor(vital_cal$vitalstatus), 
-          testingSetF = rnaseq_test[, 1:500],          
-          ntreeF = 800, 
-          mtryF = sqrt(ncol(rnaseq_cal)),
-          nbre_repetF = 10, #1000
-          seedInitF = 20180827          
-)  
-
-RF_robust_Descr(res)
+RF_robust_Descr(res_RNASeq)
   
-table(res$Predicted_testingSet[, 1])
+table(res_RNASeq$Predicted_testingSet[, 1])
 
 ```
+
+## Description cna
+
+```{r, eval=TRUE}
+
+RF_robust_Descr(res_CNA)
+  
+table(res_CNA$Predicted_testingSet[, 1])
+
+```
+
+## Description methyl
+
+```{r, eval=TRUE}
+
+RF_robust_Descr(res_methyl)
+  
+table(res_methyl$Predicted_testingSet[, 1])
+
+```
+
+## Description miRNA
+
+```{r, eval=TRUE}
+
+RF_robust_Descr(res_miRNA)
+  
+table(res_miRNA$Predicted_testingSet[, 1])
+
+```
+
+## Description donnees completes
+
+```{r, eval=TRUE}
+
+RF_robust_Descr(res_dataCompl)
+  
+table(res_dataCompl$Predicted_testingSet[, 1])
+
+```
+
+
 
