@@ -1,0 +1,156 @@
+---
+title: "TCGA_ExploreUnbalancedRF"
+author: "Sandrine"
+date: "22 janvier 2019"
+output: html_document
+---
+
+
+```{r}
+
+library("randomForest")
+library("FactoMineR")
+library("ggplot2")
+
+```
+
+
+# Load and prepare the Data
+
+```{r}
+# A lancer si on veut calculer les RF en partant des donnees brutes
+load(file = "./tcga_calibvf.RDa")
+load(file = "./tcga_testvf.RDa")
+
+```
+
+```{r, eval=FALSE}
+methyl_cal[1:5, 1:5]
+cna_cal[1:5, 1:5]
+mirna_cal[1:10, 90:100]
+dim(mirna_cal)
+rnaseq_cal[1:5, 1:5]
+
+quantile(apply(mirna_cal, 2, median))
+quantile(apply(methyl_cal, 2, median))
+quantile(apply(cna_cal, 2, median))
+quantile(apply(rnaseq_cal, 2, median))
+
+
+summary(mirna_cal[1, ])
+
+summary(methyl_cal[2, ])
+
+```
+
+```{r}
+
+dataCompl_cal = cbind(rnaseq_cal, cna_cal, methyl_cal, mirna_cal)
+dataCompl_test = cbind(rnaseq_test, cna_test, methyl_test, mirna_test)
+
+```
+
+
+```{r}
+table(vital_cal)
+```
+
+# Random forest on the whole training set
+
+```{r}
+set.seed(123456)
+rf_dataCompl <- randomForest(x=dataCompl_cal,
+                         y=factor(vital_cal$vitalstatus),
+                         ntree=500,
+                         mtry = sqrt(ncol(rnaseq_cal)),
+                         importance=T,
+                         proximity=T,
+                         keep.forest=TRUE)
+
+print(rf_dataCompl)
+plot(rf_dataCompl)
+
+table(rf_dataCompl$predicted)
+table(rf_dataCompl$predicted, factor(vital_cal$vitalstatus))
+
+```
+
+
+# Random forest on sub-samples with different sampling ratio
+
+```{r}
+
+rows_1 = rownames(vital_cal)[vital_cal$vitalstatus == 1]
+rows_0 = rownames(vital_cal)[vital_cal$vitalstatus == 0]
+nbHit = rep(0, 9)
+nbFalseAlarm = rep(0, 9)
+nbMisses = rep(0, 9)
+nbCorrectRej = rep(0, 9)
+FAR = rep(NA, 9)
+TS = rep(NA, 9)
+SE = rep(NA, 9)
+SP = rep(NA, 9)
+l=1
+ratio = c(1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3)
+
+
+for (i in ratio) {
+  
+  print(paste("Effectifs : Status=1 N=", length(rows_1), "Status=1 N=", length(rows_1)*i, sep=""))
+  set.seed(123456 * i)
+  echant = c(rows_1, sample(x=rows_0, size=length(rows_1)*i))
+  print(length(echant))
+  
+  set.seed(123456 * i)
+  rf_dataCompl_subsample <- randomForest(x=dataCompl_cal[echant, ],
+                                         y=factor(vital_cal[echant, "vitalstatus"]),
+                                         ntree=500,
+                                         mtry = sqrt(ncol(rnaseq_cal)),
+                                         importance=T,
+                                         proximity=T,
+                                         keep.forest=TRUE)
+  plot(rf_dataCompl_subsample)
+  print(rf_dataCompl_subsample)
+  
+  tbl = table(rf_dataCompl_subsample$predicted, factor(vital_cal[echant, "vitalstatus"]))
+  print(tbl)
+  
+  nbHit[l] = tbl[rownames(tbl) %in% "1", colnames(tbl) %in% "1"]
+  nbFalseAlarm[l] = tbl[rownames(tbl) %in% "1", colnames(tbl) %in% "0"]
+  nbMisses[l] = tbl[rownames(tbl) %in% "0", colnames(tbl) %in% "1"]
+  nbCorrectRej[l] = tbl[rownames(tbl) %in% "0", colnames(tbl) %in% "0"]
+  
+  # False alarm rate : we wan t a FAR as close as possible to 0
+  FAR[l] = nbFalseAlarm[l] / (nbHit[l] + nbFalseAlarm[l])
+  
+  # Threat score : we wan t a TS as close as possible to 1
+  TS[l] = nbHit[l] / (nbHit[l] + nbFalseAlarm[l] + nbMisses[l])
+  
+  SE[l] = nbHit[l] / (nbHit[l] + nbMisses[l])
+  SP[l] = nbCorrectRej[l] / (nbCorrectRej[l] + nbFalseAlarm[l])
+  
+  l = l+1
+}
+
+```
+
+```{r}
+dataForPlot=data.frame(ratio = ratio, FAR = FAR, TS = TS)
+g = ggplot(data=dataForPlot, aes(x=ratio, y=FAR))
+g = g + geom_line(col="red")
+g = g + geom_line(aes(x=ratio, y=TS), col="green4")
+g = g + ggtitle("Red is for FAR and green for TS")
+g
+
+```
+
+
+```{r}
+dataForPlot=data.frame(ratio = ratio, SE = SE, SP = SP)
+g = ggplot(data=dataForPlot, aes(x=ratio, y=SE))
+g = g + geom_line(col="red")
+g = g + geom_line(aes(x=ratio, y=SP), col="green4")
+g = g + ggtitle("Red is for SE and green for SP")
+g
+
+```
